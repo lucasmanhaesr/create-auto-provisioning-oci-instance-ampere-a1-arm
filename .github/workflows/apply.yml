@@ -1,0 +1,76 @@
+name: Ampere A1 auto-provision
+
+on:
+  schedule:
+    # A cada 12 minutos. GitHub Actions nao garante o horario exato (pode
+    # atrasar sob carga) e desativa schedules automaticamente apos 60 dias
+    # sem commits no repositorio.
+    - cron: "*/12 * * * *"
+  workflow_dispatch: {}
+
+concurrency:
+  group: terraform-apply
+  cancel-in-progress: false
+
+# actions:write e necessario para o job poder se auto-desativar
+# (gh workflow disable) quando a instancia finalmente for criada.
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.12.2"
+
+      - name: Escrever chave de API OCI em arquivo
+        run: |
+          umask 077
+          cat << 'EOF' > "${RUNNER_TEMP}/oci_api_key.pem"
+          ${{ secrets.OCI_PRIVATE_KEY }}
+          EOF
+
+      - name: Terraform Init
+        run: |
+          terraform init \
+            -backend-config="bucket=${{ secrets.TF_STATE_BUCKET }}" \
+            -backend-config="namespace=${{ secrets.OCI_NAMESPACE }}" \
+            -backend-config="region=${{ secrets.OCI_REGION }}" \
+            -backend-config="key=ampere-a1/terraform.tfstate" \
+            -backend-config="tenancy_ocid=${{ secrets.OCI_TENANCY_OCID }}" \
+            -backend-config="user_ocid=${{ secrets.OCI_USER_OCID }}" \
+            -backend-config="fingerprint=${{ secrets.OCI_FINGERPRINT }}" \
+            -backend-config="private_key_path=${RUNNER_TEMP}/oci_api_key.pem" \
+            -backend-config="auth=APIKey"
+
+      - name: Terraform Apply
+        id: apply
+        env:
+          TF_VAR_tenancy_ocid: ${{ secrets.OCI_TENANCY_OCID }}
+          TF_VAR_user_ocid: ${{ secrets.OCI_USER_OCID }}
+          TF_VAR_fingerprint: ${{ secrets.OCI_FINGERPRINT }}
+          TF_VAR_region: ${{ secrets.OCI_REGION }}
+        run: |
+          export TF_VAR_private_key_path="${RUNNER_TEMP}/oci_api_key.pem"
+          terraform apply -auto-approve
+        # A instancia Ampere A1 free tier costuma falhar com "Out of host
+        # capacity" - isso e esperado, e o proximo agendamento tenta de novo.
+        # continue-on-error evita que o workflow fique marcado como falho (e
+        # gere e-mail de falha) a cada tentativa sem capacidade disponivel.
+        continue-on-error: true
+
+      - name: Instancia criada com sucesso - desativar o agendamento
+        if: steps.apply.outcome == 'success'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "Apply concluido com sucesso: a instancia ja existe. Desativando o schedule para parar de tentar."
+          gh workflow disable "apply.yml"
+          # Para recriar no futuro (ex: se a instancia for terminada manualmente),
+          # reative em Actions > Ampere A1 auto-provision > "Enable workflow",
+          # ou rode: gh workflow enable apply.yml
