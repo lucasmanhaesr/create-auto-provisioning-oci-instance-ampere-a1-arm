@@ -13,7 +13,8 @@ dar certo, e então o agendamento se desativa sozinho.
 > é **externo**: um `systemd timer` rodando numa instância sempre-ligada chama
 > o workflow via API do GitHub a cada 12 minutos (ver
 > [Disparo confiável](#6-disparo-confiável-a-cada-12-min-systemd-timer)). O
-> `schedule` continua no workflow apenas como reforço.
+> `schedule` do GitHub foi **removido** do workflow para não gerar execuções
+> duplicadas ("Scheduled") - a cadência confiável vem só do timer.
 
 ## Arquitetura
 

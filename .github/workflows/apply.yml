@@ -1,11 +1,10 @@
 name: Ampere A1 auto-provision
 
+# Apenas disparo externo (systemd timer na instancia, via workflow_dispatch).
+# O 'schedule' do GitHub foi removido de proposito: alem de ser best-effort
+# (descarta crons frequentes), quando funciona ele gera execucoes duplicadas
+# ("Scheduled") que nao queremos - a cadencia confiavel vem so do timer.
 on:
-  schedule:
-    # A cada 12 minutos. GitHub Actions nao garante o horario exato (pode
-    # atrasar sob carga) e desativa schedules automaticamente apos 60 dias
-    # sem commits no repositorio.
-    - cron: "*/12 * * * *"
   workflow_dispatch: {}
 
 concurrency:
