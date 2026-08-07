@@ -55,17 +55,38 @@ jobs:
           TF_VAR_user_ocid: ${{ secrets.OCI_USER_OCID }}
           TF_VAR_fingerprint: ${{ secrets.OCI_FINGERPRINT }}
           TF_VAR_region: ${{ secrets.OCI_REGION }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           export TF_VAR_private_key_path="${RUNNER_TEMP}/oci_api_key.pem"
-          terraform apply -auto-approve
-        # A instancia Ampere A1 free tier costuma falhar com "Out of host
-        # capacity" - isso e esperado, e o proximo agendamento tenta de novo.
-        # continue-on-error evita que o workflow fique marcado como falho (e
-        # gere e-mail de falha) a cada tentativa sem capacidade disponivel.
-        continue-on-error: true
+          set -o pipefail
+          set +e
+          terraform apply -auto-approve -no-color 2>&1 | tee "${RUNNER_TEMP}/apply.log"
+          code=${PIPESTATUS[0]}
+          set -e
 
-      - name: Instancia criada com sucesso - desativar o agendamento
-        if: steps.apply.outcome == 'success'
+          # Sucesso real: a instancia foi criada. Unico caso que fica VERDE.
+          if [ "$code" -eq 0 ]; then
+            echo "### ✅ Instancia Ampere A1 criada com sucesso!" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          # "Out of host capacity": esperado. Cancela a propria execucao para
+          # NAO ficar verde (nem vermelha) e nao gerar e-mail de falha. A run
+          # aparece como "cancelada" (cinza) e o proximo ciclo tenta de novo.
+          if grep -q "Out of host capacity" "${RUNNER_TEMP}/apply.log"; then
+            echo "### ⏳ Sem capacidade Ampere A1 agora - cancelando (tenta de novo no proximo ciclo)." >> "$GITHUB_STEP_SUMMARY"
+            gh run cancel "${GITHUB_RUN_ID}"
+            sleep 60   # espera o cancelamento efetivar antes do exit de fallback
+            exit 1
+          fi
+
+          # Qualquer outro erro e real (auth, cota, config...) e precisa de
+          # atencao: deixa VERMELHO para o GitHub te notificar por e-mail.
+          echo "### ❌ Erro inesperado no apply (nao e falta de capacidade). Verifique os logs." >> "$GITHUB_STEP_SUMMARY"
+          exit "$code"
+
+      - name: Instancia criada - desativar o agendamento
+        if: success()
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
