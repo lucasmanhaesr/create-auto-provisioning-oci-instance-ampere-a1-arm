@@ -69,7 +69,7 @@ resource "oci_core_instance" "generated_oci_core_instance" {
 	}
 	shape = "VM.Standard.A1.Flex"
 	shape_config {
-		memory_in_gbs = "3"
+		memory_in_gbs = "6"
 		ocpus = "1"
 	}
 	source_details {
