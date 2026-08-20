@@ -219,15 +219,77 @@ Aba **Actions** → workflow **"Ampere A1 auto-provision"** → **Run workflow**
   também para sozinho no ciclo seguinte.
 - **IP público**: `terraform output instance_public_ip` (rodando localmente
   com os mesmos secrets como variáveis de ambiente) ou no Console da instância.
-- **Chave SSH privada**: Console → **Identity & Security → Vault** →
-  `vault-ampere-a1-ssh-keys` → **Secrets** → `ampere-a1-ssh-private-key` →
-  **View Secret Contents** (vem em Base64). Via CLI:
+- **Usuário SSH**: `ubuntu` (a imagem é Ubuntu 22.04).
+
+### Como recuperar a chave SSH privada
+
+O `terraform apply` roda num runner efêmero do GitHub Actions, então o
+`generated/oci_a1.key` **não sobrevive** à execução. As cópias duráveis da chave são
+o **OCI Vault** e o **state** no Object Storage. O caminho mais direto é pelo
+Vault, usando o **Cloud Shell** (já vem autenticado, sem instalar nada).
+
+**1. Descobrir o OCID do secret** (`--all` evita o aviso de paginação):
+
+```bash
+oci vault secret list --all \
+  --compartment-id <TENANCY_OCID> \
+  --name ampere-a1-ssh-private-key \
+  --query 'data[0].id' --raw-output
+```
+
+**2. Baixar e decodificar** (o secret é guardado em Base64). Grave direto na raiz
+do home: o **Download** do Cloud Shell não enxerga pastas ocultas como `~/.ssh`.
+
+```bash
+oci secrets secret-bundle get \
+  --secret-id <OCID_DO_SECRET> \
+  --query 'data."secret-bundle-content".content' --raw-output \
+  | base64 -d > ~/oci_a1.key
+chmod 600 ~/oci_a1.key
+head -1 ~/oci_a1.key   # deve mostrar: -----BEGIN OPENSSH PRIVATE KEY-----
+```
+
+> `cd ~/oci_a1.key` dá `Not a directory` - isso é esperado, é um arquivo.
+
+**3. Testar ainda no Cloud Shell** (opcional, mas confirma que a chave presta
+antes de você mexer em permissão no Windows):
+
+```bash
+ssh -i ~/oci_a1.key ubuntu@<IP_PUBLICO>
+```
+
+**4. Baixar para a sua máquina**: no painel do Cloud Shell, menu de opções
+(engrenagem / "hambúrguer" no canto superior direito) → **Download** → digite
+`oci_a1.key` como caminho → confirmar. O arquivo cai no seu *Downloads*.
+
+**5. Ajustar permissões e conectar.** O `ssh.exe` do Windows recusa chave herdada
+como "legível por todos", então é preciso restringir a ACL:
+
+```powershell
+move "$env:USERPROFILE\Downloads\oci_a1.key" "$env:USERPROFILE\.ssh\oci_a1.key"
+icacls "$env:USERPROFILE\.ssh\oci_a1.key" /inheritance:r /grant:r "$($env:USERNAME):R"
+ssh -i "$env:USERPROFILE\.ssh\oci_a1.key" ubuntu@<IP_PUBLICO>
+```
+
+No Linux/macOS o equivalente é só `chmod 600 ~/.ssh/oci_a1.key`.
+
+**6. Limpar a cópia do Cloud Shell** quando terminar: `rm ~/oci_a1.key`.
+
+Alternativas ao Cloud Shell:
+- **Console**: **Identity & Security → Vault** → `vault-ampere-a1-ssh-keys` →
+  **Secrets** → `ampere-a1-ssh-private-key` → **View Secret Contents** (vem em
+  Base64, você decodifica na mão).
+- **Terraform local**, com os mesmos secrets do workflow exportados e o
+  `init -backend-config=...` que o workflow usa em [apply.yml](.github/workflows/apply.yml):
   ```bash
-  oci secrets secret-bundle get --secret-id <OCID_DO_SECRET> \
-    --query 'data."secret-bundle-content".content' --raw-output | base64 -d > id_rsa
-  chmod 600 id_rsa
-  ssh -i id_rsa ubuntu@<IP_PUBLICO>
+  { terraform output -raw ssh_private_key_pem; echo; } > oci_a1.key
+  chmod 600 oci_a1.key
   ```
+
+> A chave é gerada no formato **OpenSSH** (`-----BEGIN OPENSSH PRIVATE KEY-----`),
+> não PEM clássico - para usar no PuTTY, converta antes com o PuTTYgen.
+> E nunca commite esse arquivo: `generated/` e `*.tfstate*` já estão no
+> `.gitignore`, mas o `.key` baixado fica fora do repo.
 
 ## Como reativar (se a instância for terminada e você quiser recriar)
 

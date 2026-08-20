@@ -10,13 +10,13 @@ resource "tls_private_key" "ssh_key" {
 # Atenção: se aplicado via GitHub Actions, o runner é efêmero e este arquivo
 # não sobrevive entre execuções - a cópia durável é o OCI Vault abaixo.
 resource "local_sensitive_file" "ssh_private_key" {
-	filename        = "${path.module}/generated/ssh_key"
+	filename        = "${path.module}/generated/oci_a1.key"
 	content         = tls_private_key.ssh_key.private_key_openssh
 	file_permission = "0600"
 }
 
 resource "local_file" "ssh_public_key" {
-	filename = "${path.module}/generated/ssh_key.pub"
+	filename = "${path.module}/generated/oci_a1.key.pub"
 	content  = tls_private_key.ssh_key.public_key_openssh
 }
 
